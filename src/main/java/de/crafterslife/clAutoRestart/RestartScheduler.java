@@ -7,79 +7,79 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.scheduler.BukkitRunnable;
+
 import java.time.LocalTime;
-import java.time.Duration;
+import java.time.temporal.ChronoField;
+import java.util.concurrent.TimeUnit;
 
 public class RestartScheduler {
-    private static final long RESTART_INTERVAL = 12 * 60 * 60 * 20; // 12 Stunden in Ticks
+    private static final long INITIAL_RESTART = TimeUnit.HOURS.toMillis(3);
+    private static final long RESTART_INTERVAL = TimeUnit.HOURS.toMillis(12);
+
+    private static final long MINUTE = 60 * 1000;
+
     private static final long[] WARNING_TIMES = {
-            15 * 60 * 20, // 15 Minuten
-            10 * 60 * 20, // 10 Minuten
-            5 * 60 * 20,  // 5 Minuten
-            1 * 60 * 20,  // 1 Minute
-            3 * 20,       // 3 Sekunden
-            2 * 20,       // 2 Sekunden
-            1 * 20        // 1 Sekunde
+            15 * MINUTE, // 15 Minuten
+            10 * MINUTE, // 10 Minuten
+            5 * MINUTE,  // 5 Minuten
+            MINUTE,      // 1 Minute
+            3 * 1000,    // 3 Sekunden
+            2 * 1000,    // 2 Sekunden
+            1000         // 1 Sekunde
     };
 
     private final ClAutoRestart plugin;
     private final BossBar bossBar;
+    private final Thread thread;
 
     public RestartScheduler(ClAutoRestart plugin) {
         this.plugin = plugin;
         this.bossBar = Bukkit.createBossBar("", BarColor.RED, BarStyle.SOLID);
+        this.thread = Thread.ofPlatform()
+                .daemon()
+                .name("RestartScheduler")
+                .priority(Thread.MAX_PRIORITY)
+                .start(this::run);
     }
 
-    public void scheduleFirstRestart() {
-        LocalTime now = LocalTime.now();
-        LocalTime firstRestartTime = LocalTime.of(3, 0);
+    public void stop() {
+        if (!thread.isAlive())
+            return;
+        thread.interrupt();
+    }
 
-        long initialDelay = now.isAfter(firstRestartTime) ?
-                Duration.between(now, firstRestartTime.plusHours(24)).getSeconds() * 20 :
-                Duration.between(now, firstRestartTime).getSeconds() * 20;
-
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                scheduleRestart();
+    private void run() {
+        try {
+            LocalTime now = LocalTime.now();
+            int millis = now.get(ChronoField.MILLI_OF_DAY);
+            long restart = INITIAL_RESTART;
+            while (millis > restart) {
+                restart += RESTART_INTERVAL;
             }
-        }.runTaskLater(plugin, initialDelay);
-    }
 
-    private void scheduleRestart() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (long warning : WARNING_TIMES) {
-                    new BukkitRunnable() {
-                        @Override
-                        public void run() {
-                            sendWarningMessage(warning);
-                        }
-                    }.runTaskLater(plugin, RESTART_INTERVAL - warning);
+            Thread.sleep(Math.max(restart - millis - WARNING_TIMES[0], 0));
+
+            for (int i = 0; i < WARNING_TIMES.length; i++) {
+                long time = WARNING_TIMES[i];
+                sendWarningMessage(time);
+
+                if (i < WARNING_TIMES.length - 1) {
+                    Thread.sleep(time - WARNING_TIMES[i + 1]);
                 }
-
-                new BukkitRunnable() {
-                    @Override
-                    public void run() {
-                        Bukkit.broadcast(Component.text("Der Server wird jetzt neu gestartet!", NamedTextColor.RED));
-                        Bukkit.spigot().restart();
-                    }
-                }.runTaskLater(plugin, RESTART_INTERVAL);
             }
-        }.runTaskTimer(plugin, 0, RESTART_INTERVAL);
+
+            Bukkit.spigot().restart();
+        } catch (InterruptedException ignored) {}
     }
 
     private void sendWarningMessage(long warning) {
-        if (warning >= 60 * 20) {
-            long minutes = warning / (60 * 20);
-            Bukkit.broadcast(Component.text("Der Server startet in " + minutes + " Minuten neu!", NamedTextColor.RED));
+        if (warning >= MINUTE) {
+            Bukkit.broadcast(Component.text("Der Server startet in " + warning / MINUTE + " Minuten neu!", NamedTextColor.RED));
         } else {
-            long seconds = warning / 20;
-            Bukkit.broadcast(Component.text("Der Server startet in " + seconds + " Sekunden neu!", NamedTextColor.RED));
-            if (warning == 60 * 20) {
-                startBossBarCountdown();
-            }
+            Bukkit.broadcast(Component.text("Der Server startet in " + warning / 1000 + " Sekunden neu!", NamedTextColor.RED));
+        }
+        if (warning == MINUTE) {
+            startBossBarCountdown();
         }
     }
 
@@ -88,19 +88,20 @@ public class RestartScheduler {
         bossBar.setProgress(1.0);
         Bukkit.getOnlinePlayers().forEach(bossBar::addPlayer);
 
+        long shutdown = System.currentTimeMillis() + MINUTE;
         new BukkitRunnable() {
-            int timeLeft = 60;
             @Override
             public void run() {
-                if (timeLeft <= 0) {
+                long now = System.currentTimeMillis();
+                if (now >= shutdown) {
                     bossBar.removeAll();
                     cancel();
                     return;
                 }
-                bossBar.setTitle("Server Neustart in " + timeLeft + " Sekunden!");
-                bossBar.setProgress(timeLeft / 60.0);
-                timeLeft--;
+                long remaining = shutdown - now;
+                bossBar.setTitle("Server Neustart in " + remaining / 1000 + " Sekunden!");
+                bossBar.setProgress(remaining / 60000.0);
             }
-        }.runTaskTimer(plugin, 0, 20);
+        }.runTaskTimer(plugin, 0, 1);
     }
 }

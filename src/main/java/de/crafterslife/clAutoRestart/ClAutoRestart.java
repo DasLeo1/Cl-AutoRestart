@@ -8,6 +8,13 @@ public class ClAutoRestart extends JavaPlugin {
     @Override
     public void onEnable() {
         restartScheduler = new RestartScheduler(this);
-        restartScheduler.scheduleFirstRestart();
+    }
+
+    @Override
+    public void onDisable() {
+        if (restartScheduler == null)
+            return;
+        restartScheduler.stop();
+        restartScheduler = null;
     }
 }
