@@ -1,0 +1,6 @@
+name: Cl-AutoRestart
+version: '1.0.0'
+main: de.crafterslife.clAutoRestart.ClAutoRestart
+api-version: '1.21'
+authors: [ Das_leo_ ]
+website: https://crafterslife.de/
